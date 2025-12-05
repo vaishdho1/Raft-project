@@ -1,4 +1,4 @@
-# Raft Consensus Implementation in Go
+# Raft Implementation in Go
 
 A production-style implementation of the Raft consensus algorithm in Go. This project implements the complete Raft protocol including leader election, log replication, crash safe persistence, and snapshot based log compaction. The Raft module can be used as a foundation for building distributed systems like replicated key-value stores, message queues, or other state machine applications.
 
@@ -27,27 +27,6 @@ The core Raft implementation provides:
 - **Persistence**: `persist()` and `readPersist()` for crash recovery
 - **Snapshots**: `Snapshot()` and `InstallSnapshot` RPC for log compaction
 - **State Machine Interface**: Commits log entries via `ApplyMsg` channel
-
-## Prerequisites
-
-- Go 1.22 or later
-- Git
-
-## Installation
-
-```bash
-git clone <your-repo-url>
-cd raftkv/src
-go mod download
-```
-
-## Building
-
-```bash
-cd src
-go build ./raft1
-```
-
 
 ## Implementation Highlights
 
