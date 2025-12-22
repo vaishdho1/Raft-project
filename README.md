@@ -1,6 +1,6 @@
-# Raft Consensus Implementation in Go
+# Raft + Replicated Key/Value Store
 
-A production-style implementation of the Raft consensus algorithm in Go. This project implements the complete Raft protocol including leader election, log replication, crash safe persistence, and snapshot based log compaction. The Raft module can be used as a foundation for building distributed systems like replicated key-value stores, message queues, or other state machine applications.
+A production style implementation of the Raft consensus algorithm in Go, plus a Raft backed replicated key/value store. It includes leader election, log replication, crash safe persistence, and snapshot based log compaction, and uses Porcupine to check linearizability for the KV service.
 
 > **Note**: This implementation is based on MIT 6.5840 (formerly 6.824) Distributed Systems course materials. 
 > 
@@ -15,7 +15,7 @@ A production-style implementation of the Raft consensus algorithm in Go. This pr
 - ✅ **Persistence**: Crash safe state persistence with atomic writes
 - ✅ **Snapshots**: Log compaction with InstallSnapshot RPC for lagging followers
 - ✅ **Fault Tolerance**: Handles network partitions, node crashes, and message loss/reordering
-- ✅ **Strong Consistency**: Linearizable operations via state machine replication
+- ✅ **Strong Consistency**: Linearizable operations via state machine replication 
 
 ## Architecture
 
@@ -27,6 +27,15 @@ The core Raft implementation provides:
 - **Persistence**: `persist()` and `readPersist()` for crash recovery
 - **Snapshots**: `Snapshot()` and `InstallSnapshot` RPC for log compaction
 - **State Machine Interface**: Commits log entries via `ApplyMsg` channel
+
+### Replicated Key/Value Store (`kvraft1/`)
+
+The KV service is built on top of Raft using state machine replication:
+- **Client/Server**: `src/kvraft1/client.go` and `src/kvraft1/server.go`
+- **Apply path**: Raft delivers committed commands and installed snapshots to the service via the
+  Raft `ApplyMsg` channel, the KV layer applies them deterministically.
+- **Snapshots**: The KV layer can snapshot its state; Raft persists the snapshot and uses it
+  to compact the log and to bring lagging peers up to date via `InstallSnapshot`.
 
 ## Prerequisites
 
@@ -65,6 +74,14 @@ Implements the XTerm/XIndex/XLen optimization from the extended Raft paper, allo
 
 All persistent state (term, vote, log, snapshot metadata) is atomically persisted before any state changes, ensuring correct recovery after crashes.
 
+### KV Store Semantics (on top of Raft)
+
+- **Versioned writes**: `Put(key, value, expectedVersion)` provides optimistic concurrency control per key.
+- **Client uncertainty**: The client may return `ErrMaybe` when it cannot safely determine whether a `Put`
+  applied during retries/leader churn (needed for linearizability-friendly semantics).
+- **Snapshot driven compaction**: The KV layer snapshots state and Raft uses it to compact the log and
+  catch up lagging replicas via `InstallSnapshot`.
+
 ## References
 
 - [Raft Paper](https://raft.github.io/raft.pdf)
@@ -75,11 +92,4 @@ All persistent state (term, vote, log, snapshot metadata) is atomically persiste
 
 This project is based on MIT 6.5840 course materials. Please refer to the course license for usage terms.
 
-## Future Work
-
-Potential applications to build on top of this Raft implementation:
-- **Distributed Message Queue**: Replicated message broker with at-least-once delivery guarantees
-- **Distributed Configuration Store**: Consistent configuration management across clusters
-- **Distributed Lock Service**: Distributed locking primitives
-- **Custom State Machines**: Any application requiring strong consistency and fault tolerance
 
