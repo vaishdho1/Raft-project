@@ -27,7 +27,14 @@ var KvModel = porcupine.Model{
 	Partition: func(history []porcupine.Operation) [][]porcupine.Operation {
 		m := make(map[string][]porcupine.Operation)
 		for _, v := range history {
-			key := v.Input.(KvInput).Key
+			// The visualizer may include "annotation" operations with nil/unknown
+			// inputs. Keep them in a special bucket to avoid panics.
+			inp, ok := v.Input.(KvInput)
+			if !ok {
+				m["<meta>"] = append(m["<meta>"], v)
+				continue
+			}
+			key := inp.Key
 			m[key] = append(m[key], v)
 		}
 		keys := make([]string, 0, len(m))
@@ -66,8 +73,19 @@ var KvModel = porcupine.Model{
 		}
 	},
 	DescribeOperation: func(input, output interface{}) string {
-		inp := input.(KvInput)
-		out := output.(KvOutput)
+		// The visualizer may add metadata/annotation entries with nil or
+		// non-KvInput/KvOutput values. Don't panic; render something reasonable.
+		if input == nil {
+			return "<meta>"
+		}
+		inp, ok := input.(KvInput)
+		if !ok {
+			return fmt.Sprintf("<meta %T>", input)
+		}
+		out, ok := output.(KvOutput)
+		if !ok {
+			return fmt.Sprintf("<op=%d key=%q output=%T>", inp.Op, inp.Key, output)
+		}
 		switch inp.Op {
 		case 0:
 			return fmt.Sprintf("get('%s') -> ('%s', '%d', '%s')", inp.Key, out.Value, out.Version, out.Err)

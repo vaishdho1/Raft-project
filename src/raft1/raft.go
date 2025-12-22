@@ -10,7 +10,10 @@ import (
 	//	"bytes"
 
 	"bytes"
+	"log"
 	"math/rand"
+	"os"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -21,6 +24,14 @@ import (
 	"raftkv/raftapi"
 	tester "raftkv/tester1"
 )
+
+var raftDebug = os.Getenv("RAFT_DEBUG") == "1"
+
+func raftDPrintf(format string, args ...any) {
+	if raftDebug {
+		log.Printf("[raft] "+format, args...)
+	}
+}
 
 // Consants for leader election
 const (
@@ -51,6 +62,8 @@ type Raft struct {
 	dead        int32               // set by Kill()
 	state       RaftState           // The current state of the server
 	applyCh     chan raftapi.ApplyMsg
+	applyMu     sync.Mutex // serialize applyCh send vs close
+	applyClosed bool
 	commitCond  sync.Cond
 	CurrentTerm int        //Latest term server has seen
 	VotedFor    int        //Peer that received vote in the currentTerm (initially -1)
@@ -143,6 +156,11 @@ func (rf *Raft) Snapshot(index int, snapshot []byte) {
 	if index <= rf.StartIndex || index > int(rf.commitIndex) {
 		return
 	}
+	raftDPrintf("me=%d Snapshot(index=%d): before StartIndex=%d commit=%d applied=%d loglen=%d snapBytes=%d",
+		rf.me, index, rf.StartIndex, rf.commitIndex, rf.lastApplied, len(rf.Log), len(snapshot))
+	if index > int(rf.lastApplied) {
+		rf.lastApplied = int32(index)
+	}
 	sliceIndex := index - rf.StartIndex
 	term := rf.Log[sliceIndex].Term
 	//We need to now trim the log and store the dummy first entry with the same term and index as
@@ -159,6 +177,8 @@ func (rf *Raft) Snapshot(index int, snapshot []byte) {
 		}
 	}
 	rf.persist()
+	raftDPrintf("me=%d Snapshot(index=%d): after StartIndex=%d commit=%d applied=%d loglen=%d",
+		rf.me, index, rf.StartIndex, rf.commitIndex, rf.lastApplied, len(rf.Log))
 
 }
 
@@ -182,15 +202,29 @@ func (rf *Raft) InstallSnapshot(request_args *SnapshotRequestArgs, reply_args *S
 		rf.mu.Unlock()
 		return
 	}
+	raftDPrintf("me=%d InstallSnapshot(from leader=%d term=%d idx=%d): before term=%d state=%d StartIndex=%d commit=%d applied=%d loglen=%d snapBytes=%d",
+		rf.me, request_args.LeaderId, request_args.Term, request_args.LastIncludedIndex,
+		rf.CurrentTerm, rf.state, rf.StartIndex, rf.commitIndex, rf.lastApplied, len(rf.Log), len(request_args.Data))
 	//Check if this is a new term
 	if request_args.Term > rf.CurrentTerm {
 		rf.CurrentTerm = request_args.Term
-		rf.state = StateFollower
 		rf.VotedFor = -1
 	}
+	//Always become a follower if its the same or greater term
+	rf.state = StateFollower
+	rf.HeartbeatTime = time.Now()
 	reply_args.Term = rf.CurrentTerm
 	//If this is a stale snapshot, I have the most upto date log
 	if request_args.LastIncludedIndex <= rf.StartIndex {
+		raftDPrintf("me=%d InstallSnapshot(idx=%d): stale (StartIndex=%d) - ignore", rf.me, request_args.LastIncludedIndex, rf.StartIndex)
+		rf.mu.Unlock()
+		return
+	}
+	// Also stale if we've already applied past this point. Installing it would roll
+	// back the service state machine (and can violate linearizability).
+	if request_args.LastIncludedIndex <= int(rf.lastApplied) {
+		raftDPrintf("me=%d InstallSnapshot(idx=%d): stale (lastApplied=%d StartIndex=%d) - ignore",
+			rf.me, request_args.LastIncludedIndex, rf.lastApplied, rf.StartIndex)
 		rf.mu.Unlock()
 		return
 	}
@@ -215,11 +249,13 @@ func (rf *Raft) InstallSnapshot(request_args *SnapshotRequestArgs, reply_args *S
 	//Replace the shapshot
 	rf.snapshot = request_args.Data
 	rf.StartIndex = request_args.LastIncludedIndex
-	// Move commit index and applied index
-	rf.commitIndex = int32(rf.StartIndex)
-	rf.lastApplied = int32(rf.StartIndex)
+	//Store the max for commit index and lastApplied
+	rf.commitIndex = max(rf.commitIndex, int32(rf.StartIndex))
+	rf.lastApplied = max(rf.lastApplied, int32(rf.StartIndex))
 	//Persist the new snapshot and the new states if any
 	rf.persist()
+	raftDPrintf("me=%d InstallSnapshot(idx=%d): after StartIndex=%d commit=%d applied=%d loglen=%d",
+		rf.me, request_args.LastIncludedIndex, rf.StartIndex, rf.commitIndex, rf.lastApplied, len(rf.Log))
 	//Send to the top
 	applymessage := raftapi.ApplyMsg{
 		SnapshotValid: true,
@@ -230,7 +266,11 @@ func (rf *Raft) InstallSnapshot(request_args *SnapshotRequestArgs, reply_args *S
 
 	rf.mu.Unlock()
 	//Send the updated message back
-	rf.applyCh <- applymessage
+	rf.applyMu.Lock()
+	if !rf.applyClosed {
+		rf.applyCh <- applymessage
+	}
+	rf.applyMu.Unlock()
 
 }
 
@@ -335,6 +375,14 @@ func (rf *Raft) Kill() {
 	rf.mu.Lock()
 	rf.commitCond.Broadcast()
 	rf.mu.Unlock()
+
+	// Close applyCh so the service/RSM can stop its loops (required by tests).
+	rf.applyMu.Lock()
+	if !rf.applyClosed {
+		close(rf.applyCh)
+		rf.applyClosed = true
+	}
+	rf.applyMu.Unlock()
 }
 
 func (rf *Raft) killed() bool {
@@ -373,15 +421,19 @@ func (rf *Raft) AppendEntries(args *AppendEntriesReqArgs, reply *AppendEntriesRe
 		reply.Success = false
 		return
 	}
-	//This is for leader election to make sure the node steps down if the term is greater or equal
+	// Heartbeat from a valid leader (term >= ours) resets election timer.
 	rf.HeartbeatTime = time.Now()
-	reply.Term = args.Term
+	// If term is higher, update term and clear vote. If term is equal, we should
+	// still step down to follower (a leader/candidate that receives AppendEntries
+	// for the current term must become follower).
 	if args.Term > rf.CurrentTerm {
 		rf.CurrentTerm = args.Term
-		rf.state = StateFollower
 		rf.VotedFor = -1
 		rf.persist()
 	}
+	//Always become a follower if its the same or greater term
+	rf.state = StateFollower
+	reply.Term = rf.CurrentTerm
 	//Ignore this since you are sending an index smaller than my startIndex, this is definetely stale.Since
 	//you are the leader I already moved because of you or some other leader so  i should match before this
 	if args.PrevLogIndex < rf.StartIndex {
@@ -473,6 +525,10 @@ func (rf *Raft) sendSnapshotTo(server int) bool {
 		rf.VotedFor = -1
 		rf.CurrentTerm = snapshotReplyargs.Term
 		rf.persist()
+		return false
+	}
+	//If its an old snapshot reply, ignore
+	if snapshotRequestArgs.Term < rf.CurrentTerm {
 		return false
 	}
 	rf.nextIndex[server] = rf.StartIndex + 1
@@ -724,18 +780,32 @@ func (rf *Raft) committer() {
 	//Run a loop which periodially checks in all changes
 	for !rf.killed() {
 		rf.mu.Lock()
+		// Snapshot barrier: Raft must never emit CommandValid messages for indices
+		// that are no longer in the log (<= StartIndex). Ensure lastApplied is at
+		// least StartIndex before applying committed entries.
+		if rf.lastApplied < int32(rf.StartIndex) {
+			rf.lastApplied = int32(rf.StartIndex)
+		}
 		if rf.lastApplied >= rf.commitIndex {
 			rf.commitCond.Wait()
 		}
 		for !rf.killed() && rf.lastApplied < rf.commitIndex {
 			rf.lastApplied++
+			if rf.lastApplied < int32(rf.StartIndex) {
+				panic("Last applied is less than start index, " + strconv.Itoa(int(rf.StartIndex)) + " got: " + strconv.Itoa(int(rf.lastApplied)))
+			}
+			//%d and commit index is %d and start index is %d\n", rf.lastApplied, rf.commitIndex, rf.StartIndex)
 			msg := raftapi.ApplyMsg{
 				CommandValid: true,
 				Command:      rf.Log[rf.lastApplied-int32(rf.StartIndex)].Cmd,
 				CommandIndex: int(rf.lastApplied),
 			}
 			rf.mu.Unlock()
-			rf.applyCh <- msg
+			rf.applyMu.Lock()
+			if !rf.applyClosed {
+				rf.applyCh <- msg
+			}
+			rf.applyMu.Unlock()
 			rf.mu.Lock()
 		}
 		rf.mu.Unlock()
