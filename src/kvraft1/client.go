@@ -36,18 +36,18 @@ func (ck *Clerk) Get(key string) (string, rpc.Tversion, rpc.Err) {
 	for {
 		for off := 0; off < len(ck.servers); off++ {
 			curLeader := (off + ck.lastLeader) % len(ck.servers)
-			reply := rpc.GetReply{}
+		reply := rpc.GetReply{}
 			ok := ck.clnt.Call(ck.servers[curLeader], "KVServer.Get", &args, &reply)
 			if !ok || reply.Err == rpc.ErrWrongLeader {
-				continue
-			}
+			continue
+		}
 			ck.lastLeader = curLeader
-			if reply.Err == rpc.ErrNoKey {
-				return "", 0, reply.Err
-			}
-			if reply.Err == rpc.OK {
-				return reply.Value, reply.Version, reply.Err
-			}
+		if reply.Err == rpc.ErrNoKey {
+			return "", 0, reply.Err
+		}
+		if reply.Err == rpc.OK {
+			return reply.Value, reply.Version, reply.Err
+		}
 
 		}
 		time.Sleep(20 * time.Millisecond)

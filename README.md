@@ -1,4 +1,4 @@
-# Raft + Replicated Key/Value Store
+# Replicated Key-Value Store over Raft
 
 A production style implementation of the Raft consensus algorithm in Go, plus a Raft backed replicated key/value store. It includes leader election, log replication, crash safe persistence, and snapshot based log compaction, and uses Porcupine to check linearizability for the KV service.
 
