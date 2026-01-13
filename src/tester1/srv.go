@@ -31,17 +31,14 @@ func makeServer(net *labrpc.Network, gid Tgid, nsrv int) *Server {
 }
 
 // If restart servers, first call ShutdownServer
-func (s *Server) startServer(gid Tgid) *Server {
+func (s *Server) startServer(gid Tgid, i int, testName string) *Server {
 	srv := makeServer(s.net, gid, len(s.endNames))
-	// a fresh persister, so old instance doesn't overwrite
-	// new instance's persisted state.
-	// give the fresh persister a copy of the old persister's
-	// state, so that the spec is that we pass StartKVServer()
-	// the last persisted state.
+	// a fresh persister
 	if s.saved != nil {
 		srv.saved = s.saved.Copy()
 	} else {
-		srv.saved = MakePersister()
+		//Pass the new testName to create a directory for the test
+		srv.saved = MakePersisterWithTagFresh(ServerName(gid, i), testName)
 	}
 	return srv
 }
@@ -52,7 +49,6 @@ func (s *Server) connect(sg *ServerGrp, to []int) {
 	defer s.mu.Unlock()
 	for j := 0; j < len(to); j++ {
 		if sg.IsConnected(to[j]) {
-			//log.Printf("connect %d to %d (%v)", s.id, to[j], s.endNames[to[j]])
 			endname := s.endNames[to[j]]
 			s.net.Enable(endname, true)
 		}
@@ -76,10 +72,9 @@ func (s *Server) shutdownServer() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// a fresh persister, in case old instance
-	// continues to update the Persister.
-	// but copy old persister's content so that we always
-	// pass Make() the last persisted state.
+	//Store a copy of the persister to pass to the new server
+	// for simulating restarts after a crash
+
 	if s.saved != nil {
 		s.saved = s.saved.Copy()
 	}

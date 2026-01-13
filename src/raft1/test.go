@@ -35,7 +35,7 @@ func makeTest(t *testing.T, n int, reliable bool, snapshot bool) *Test {
 		srvs:     make([]*rfsrv, n),
 		snapshot: snapshot,
 	}
-	ts.Config = tester.MakeConfig(t, n, reliable, ts.mksrv)
+	ts.Config = tester.MakeConfigNamed(t, t.Name(), n, reliable, ts.mksrv)
 	ts.Config.SetLongDelays(true)
 	ts.g = ts.Group(tester.GRP0)
 	return ts

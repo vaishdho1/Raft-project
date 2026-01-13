@@ -3,6 +3,7 @@ package kvtest
 import (
 	"encoding/json"
 	"fmt"
+
 	//"log"
 	"math/rand"
 	"strconv"
@@ -10,7 +11,7 @@ import (
 	"time"
 
 	"raftkv/kvsrv1/rpc"
-	"raftkv/tester1"
+	tester "raftkv/tester1"
 )
 
 // The tester generously allows solutions to complete elections in one second

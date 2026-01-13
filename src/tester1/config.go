@@ -36,7 +36,14 @@ type Config struct {
 	ops   int32     // number of clerk get/put/append method calls
 }
 
+// MakeConfig is the original harness API (kept for compatibility with other labs).
 func MakeConfig(t *testing.T, n int, reliable bool, mks FstartServer) *Config {
+	return MakeConfigNamed(t, "", n, reliable, mks)
+}
+
+// MakeConfigNamed is like MakeConfig, but also attaches a logical test name that can be
+// used to scope disk persistence directories under PERSISTER_DIR.
+func MakeConfigNamed(t *testing.T, testName string, n int, reliable bool, mks FstartServer) *Config {
 	ncpu_once.Do(func() {
 		if runtime.NumCPU() < 2 {
 			fmt.Printf("warning: only one CPU, which may conceal locking bugs\n")
@@ -48,7 +55,7 @@ func MakeConfig(t *testing.T, n int, reliable bool, mks FstartServer) *Config {
 	cfg.t = t
 	cfg.net = labrpc.MakeNetwork()
 	cfg.Groups = newGroups(cfg.net)
-	cfg.MakeGroupStart(GRP0, n, mks)
+	cfg.MakeGroupStartNamed(GRP0, n, mks, testName)
 	cfg.Clnts = makeClnts(cfg.net)
 	cfg.start = time.Now()
 
@@ -90,8 +97,14 @@ func (cfg *Config) Cleanup() {
 }
 
 func (cfg *Config) MakeGroupStart(gid Tgid, nsrv int, mks FstartServer) {
+	cfg.MakeGroupStartNamed(gid, nsrv, mks, "")
+}
+
+func (cfg *Config) MakeGroupStartNamed(gid Tgid, nsrv int, mks FstartServer, testName string) {
 	cfg.MakeGroup(gid, nsrv, mks)
-	cfg.Group(gid).StartServers()
+	sg := cfg.Group(gid)
+	sg.SetTestName(testName)
+	sg.StartServers()
 }
 
 func (cfg *Config) ExitGroup(gid Tgid) {
@@ -127,10 +140,7 @@ func (cfg *Config) Op() {
 	atomic.AddInt32(&cfg.ops, 1)
 }
 
-// end a Test -- the fact that we got here means there
-// was no failure.
-// print the Passed message,
-// and some performance numbers.
+// end a Test
 func (cfg *Config) End() {
 	cfg.CheckTimeout()
 	if cfg.t.Failed() == false {

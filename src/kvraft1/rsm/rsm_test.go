@@ -28,7 +28,6 @@ func TestBasic4A(t *testing.T) {
 			ts.t.Fatalf(err)
 		}
 		ts.checkCounter(r.N, NSRV)
-		//log.Printf("Index %d, expected %d, got %d", i, i+1, r.N)
 	}
 }
 

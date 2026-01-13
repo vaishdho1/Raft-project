@@ -3,9 +3,9 @@ package kvraft
 import (
 	"testing"
 
-	"raftkv/kvtest1"
+	kvtest "raftkv/kvtest1"
 	"raftkv/labrpc"
-	"raftkv/tester1"
+	tester "raftkv/tester1"
 )
 
 type Test struct {
@@ -33,7 +33,7 @@ func MakeTest(t *testing.T, part string, nclients, nservers int, reliable bool, 
 		maxraftstate: maxraftstate,
 		randomkeys:   randomkeys,
 	}
-	cfg := tester.MakeConfig(t, nservers, reliable, ts.StartKVServer)
+	cfg := tester.MakeConfigNamed(t, t.Name(), nservers, reliable, ts.StartKVServer)
 	ts.Test = kvtest.MakeTest(t, cfg, randomkeys, ts)
 	ts.Begin(ts.makeTitle())
 	return ts

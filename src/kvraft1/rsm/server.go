@@ -8,7 +8,7 @@ import (
 	"raftkv/labgob"
 	"raftkv/labrpc"
 	"raftkv/raftapi"
-	"raftkv/tester1"
+	tester "raftkv/tester1"
 )
 
 type Inc struct {
@@ -52,7 +52,6 @@ func makeRsmSrv(ts *Test, srv int, ends []*labrpc.ClientEnd, persister *tester.P
 }
 
 func (rs *rsmSrv) DoOp(req any) any {
-	//log.Printf("%d: DoOp: %T(%v)", rs.me, req, req)
 	switch req.(type) {
 	case Inc:
 		rs.mu.Lock()
@@ -82,14 +81,12 @@ func (rs *rsmSrv) Restore(data []byte) {
 	if d.Decode(&rs.counter) != nil {
 		log.Fatalf("%v couldn't decode counter", rs.me)
 	}
-	//log.Printf("%d: restore %d", rs.me, rs.counter)
+
 }
 
 func (rs *rsmSrv) Kill() {
 	rs.mu.Lock()
 	defer rs.mu.Unlock()
-	//log.Printf("kill %d", rs.me)
-	//rs.rsm.Kill()
 	rs.rsm = nil
 }
 

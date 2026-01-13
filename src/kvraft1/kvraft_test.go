@@ -9,7 +9,7 @@ import (
 
 	"raftkv/kvraft1/rsm"
 	"raftkv/kvsrv1/rpc"
-	"raftkv/kvtest1"
+	kvtest "raftkv/kvtest1"
 	tester "raftkv/tester1"
 )
 

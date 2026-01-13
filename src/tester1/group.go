@@ -2,6 +2,9 @@ package tester
 
 import (
 	//"log"
+
+	"os"
+	"path/filepath"
 	"strconv"
 	"sync"
 
@@ -75,6 +78,7 @@ type ServerGrp struct {
 	connected   []bool // whether each server is on the net
 	mks         FstartServer
 	mu          sync.Mutex
+	testName    string
 }
 
 func makeSrvGrp(net *labrpc.Network, gid Tgid, n int, mks FstartServer) *ServerGrp {
@@ -84,6 +88,7 @@ func makeSrvGrp(net *labrpc.Network, gid Tgid, n int, mks FstartServer) *ServerG
 		gid:       gid,
 		connected: make([]bool, n),
 		mks:       mks,
+		testName:  "",
 	}
 	for i, _ := range sg.srvs {
 		sg.srvs[i] = makeServer(net, gid, n)
@@ -93,6 +98,10 @@ func makeSrvGrp(net *labrpc.Network, gid Tgid, n int, mks FstartServer) *ServerG
 		sg.servernames[i] = ServerName(gid, i)
 	}
 	return sg
+}
+
+func (sg *ServerGrp) SetTestName(name string) {
+	sg.testName = name
 }
 
 func (sg *ServerGrp) N() int {
@@ -142,18 +151,41 @@ func (sg *ServerGrp) ConnectOne(i int) {
 }
 
 func (sg *ServerGrp) cleanup() {
-	for _, s := range sg.srvs {
-		if s.svcs != nil {
+
+	for i, s := range sg.srvs {
+
+		sg.disconnect(i, sg.all())
+		sg.net.DeleteServer(ServerName(sg.gid, i))
+
+		// Freeze persister so late goroutines can't publish to disk.
+		if s != nil && s.saved != nil {
+			s.saved.freezePersister()
+		}
+
+		// Now stop services
+		if s != nil && s.svcs != nil {
 			for _, svc := range s.svcs {
-				svc.Kill()
+				if svc != nil {
+					svc.Kill()
+				}
 			}
 		}
+		if s != nil && s.saved != nil {
+			s.saved.cleanUp()
+		}
+	}
+
+	if os.Getenv("PERSISTER_DISK") == "1" && sg.testName != "" {
+		base := os.Getenv("PERSISTER_DIR")
+		if base == "" {
+			base = "raft-data"
+		}
+		_ = os.RemoveAll(filepath.Join(base, sg.testName))
 	}
 }
 
 // attach server i to servers listed in to caller must hold cfg.mu.
 func (sg *ServerGrp) connect(i int, to []int) {
-	//log.Printf("connect peer %d to %v\n", i, to)
 
 	sg.connected[i] = true
 
@@ -163,7 +195,6 @@ func (sg *ServerGrp) connect(i int, to []int) {
 	// connect incoming end points to me
 	for j := 0; j < len(to); j++ {
 		if sg.IsConnected(to[j]) {
-			//log.Printf("connect %d (%v) to %d", to[j], sg.srvs[to[j]].endNames[i], i)
 			endname := sg.srvs[to[j]].endNames[i]
 			sg.net.Enable(endname, true)
 		}
@@ -173,8 +204,6 @@ func (sg *ServerGrp) connect(i int, to []int) {
 // detach server from the servers listed in from
 // caller must hold cfg.mu
 func (sg *ServerGrp) disconnect(i int, from []int) {
-	// log.Printf("%p: disconnect peer %d from %v\n", sg, i, from)
-
 	sg.mu.Lock()
 	sg.connected[i] = false
 	sg.mu.Unlock()
@@ -187,7 +216,6 @@ func (sg *ServerGrp) disconnect(i int, from []int) {
 		s := sg.srvs[from[j]]
 		if s.endNames != nil {
 			endname := s.endNames[i]
-			// log.Printf("%p: disconnect: %v", sg, endname)
 			sg.net.Enable(endname, false)
 		}
 	}
@@ -233,7 +261,7 @@ func (sg *ServerGrp) SnapshotSize() int {
 
 // If restart servers, first call shutdownserver
 func (sg *ServerGrp) StartServer(i int) {
-	srv := sg.srvs[i].startServer(sg.gid)
+	srv := sg.srvs[i].startServer(sg.gid, i, sg.testName)
 	sg.srvs[i] = srv
 
 	srv.svcs = sg.mks(srv.clntEnds, sg.gid, i, srv.saved)
@@ -253,17 +281,11 @@ func (sg *ServerGrp) StartServers() {
 
 // Shutdown a server by isolating it
 func (sg *ServerGrp) ShutdownServer(i int) {
-	//log.Printf("ShutdownServer %v", ServerName(sg.gid, i))
 	sg.disconnect(i, sg.all())
 
-	// disable client connections to the server.
-	// it's important to do this before creating
-	// the new Persister in saved[i], to avoid
-	// the possibility of the server returning a
-	// positive reply to an Append but persisting
-	// the result in the superseded Persister.
 	sg.net.DeleteServer(ServerName(sg.gid, i))
-
+	//Freeze the prersister so that zombie writes are prevented
+	sg.srvs[i].saved.freezePersister()
 	sg.srvs[i].shutdownServer()
 }
 
@@ -300,7 +322,6 @@ func (sg *ServerGrp) MakePartition(l int) ([]int, []int) {
 }
 
 func (sg *ServerGrp) Partition(p1 []int, p2 []int) {
-	//log.Printf("partition servers into: %v %v\n", p1, p2)
 	for i := 0; i < len(p1); i++ {
 		sg.disconnect(p1[i], p2)
 		sg.connect(p1[i], p1)
