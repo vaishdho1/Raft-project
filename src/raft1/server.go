@@ -40,7 +40,9 @@ func newRfsrv(ts *Test, srv int, ends []*labrpc.ClientEnd, persister *tester.Per
 	}
 	applyCh := make(chan raftapi.ApplyMsg)
 	if !useRaftStateMachine {
-		s.raft = Make(ends, srv, persister, applyCh)
+		tr := NewLabrpcTransport(ends)
+		// No metrics sink in the tester harness path.
+		s.raft = Make(tr, srv, persister, applyCh, nil)
 	}
 	if snapshot {
 		snapshot := persister.ReadSnapshot()

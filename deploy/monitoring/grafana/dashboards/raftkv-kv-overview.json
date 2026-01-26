@@ -1,0 +1,303 @@
+{
+  "uid": "raftkv-kv-overview",
+  "title": "RaftKV - KV End-to-End",
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "5s",
+  "tags": ["raftkv", "kv", "prometheus"],
+  "time": { "from": "now-15m", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Offered QPS (client requests)",
+      "datasource": "Prometheus",
+      "gridPos": { "x": 0, "y": 0, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (method) (rate(kv_client_requests_total[1m]))",
+          "legendFormat": "method={{method}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] }
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "KV ops/sec (applied)",
+      "datasource": "Prometheus",
+      "gridPos": { "x": 12, "y": 0, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (method, status) (rate(kv_ops_total[1m]))",
+          "legendFormat": "method={{method}} status={{status}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] }
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "KV latency p50/p95/p99/avg",
+      "datasource": "Prometheus",
+      "gridPos": { "x": 0, "y": 8, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (le, method) (rate(kv_request_latency_seconds_bucket[1m])))",
+          "legendFormat": "method={{method}} p95"
+        },
+        {
+          "refId": "C",
+          "expr": "histogram_quantile(0.99, sum by (le, method) (rate(kv_request_latency_seconds_bucket[1m])))",
+          "legendFormat": "method={{method}} p99"
+        },
+        {
+          "refId": "B",
+          "expr": "histogram_quantile(0.50, sum by (le, method) (rate(kv_request_latency_seconds_bucket[1m])))",
+          "legendFormat": "method={{method}} p50"
+        },
+        {
+          "refId": "D",
+          "expr": "sum by (method) (rate(kv_request_latency_seconds_sum[1m])) / sum by (method) (rate(kv_request_latency_seconds_count[1m]))",
+          "legendFormat": "method={{method}} avg"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] }
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "KV submit latency p50/p95/p99/avg",
+      "datasource": "Prometheus",
+      "gridPos": { "x": 12, "y": 8, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (le, method) (rate(kv_submit_latency_seconds_bucket[1m])))",
+          "legendFormat": "method={{method}} p95"
+        },
+        {
+          "refId": "C",
+          "expr": "histogram_quantile(0.99, sum by (le, method) (rate(kv_submit_latency_seconds_bucket[1m])))",
+          "legendFormat": "method={{method}} p99"
+        },
+        {
+          "refId": "B",
+          "expr": "histogram_quantile(0.50, sum by (le, method) (rate(kv_submit_latency_seconds_bucket[1m])))",
+          "legendFormat": "method={{method}} p50"
+        },
+        {
+          "refId": "D",
+          "expr": "sum by (method) (rate(kv_submit_latency_seconds_sum[1m])) / sum by (method) (rate(kv_submit_latency_seconds_count[1m]))",
+          "legendFormat": "method={{method}} avg"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] }
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Retries (rate)",
+      "datasource": "Prometheus",
+      "gridPos": { "x": 0, "y": 16, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (method) (rate(kv_client_retries_total[1m]))",
+          "legendFormat": "retry method={{method}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] }
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Failures (rate)",
+      "datasource": "Prometheus",
+      "gridPos": { "x": 12, "y": 16, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (method, reason) (rate(kv_client_failures_total[1m]))",
+          "legendFormat": "fail method={{method}} reason={{reason}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] }
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Offered vs applied QPS",
+      "datasource": "Prometheus",
+      "gridPos": { "x": 0, "y": 24, "w": 24, "h": 8 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(kv_client_requests_total[1m]))",
+          "legendFormat": "offered (client)"
+        },
+        {
+          "refId": "B",
+          "expr": "sum(rate(kv_ops_total[1m]))",
+          "legendFormat": "applied (server)"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] }
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "Wrong leader ops (rate)",
+      "datasource": "Prometheus",
+      "gridPos": { "x": 0, "y": 32, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (method) (rate(kv_client_failures_total{reason=\"wrong_leader\"}[1m]))",
+          "legendFormat": "method={{method}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] }
+    },
+    {
+      "id": 15,
+      "type": "timeseries",
+      "title": "Client ok throughput (req/s)",
+      "datasource": "Prometheus",
+      "gridPos": { "x": 12, "y": 32, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(kv_client_requests_total[10s])) - sum(rate(kv_client_failures_total[10s]))",
+          "legendFormat": "ok req/s"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] }
+    },
+    {
+      "id": 16,
+      "type": "timeseries",
+      "title": "Client availability %",
+      "datasource": "Prometheus",
+      "gridPos": { "x": 0, "y": 40, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "(sum(rate(kv_client_requests_total[10s])) - sum(rate(kv_client_failures_total{reason=\"wrong_leader\"}[10s]))) / sum(rate(kv_client_requests_total[10s]))",
+          "legendFormat": "availability"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1 }, "overrides": [] }
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "KV latency p99 (by method)",
+      "datasource": "Prometheus",
+      "gridPos": { "x": 12, "y": 40, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.99, sum by (le, method) (rate(kv_request_latency_seconds_bucket[1m])))",
+          "legendFormat": "method={{method}} p99"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] }
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "Raft commit latency p99/avg",
+      "datasource": "Prometheus",
+      "gridPos": { "x": 0, "y": 48, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.99, sum by (le, node) (rate(raft_commit_latency_seconds_bucket[1m])))",
+          "legendFormat": "node={{node}} p99"
+        },
+        {
+          "refId": "B",
+          "expr": "sum by (node) (rate(raft_commit_latency_seconds_sum[1m])) / sum by (node) (rate(raft_commit_latency_seconds_count[1m]))",
+          "legendFormat": "node={{node}} avg"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] }
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "CPU usage % (process)",
+      "datasource": "Prometheus",
+      "gridPos": { "x": 12, "y": 48, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "100 * rate(process_cpu_seconds_total[1m])",
+          "legendFormat": "process"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "percent" }, "overrides": [] }
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "Network MB/s (node exporter)",
+      "datasource": "Prometheus",
+      "gridPos": { "x": 0, "y": 56, "w": 24, "h": 8 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (device) (rate(node_network_transmit_bytes_total[1m])) / 1024 / 1024",
+          "legendFormat": "tx {{device}}"
+        },
+        {
+          "refId": "B",
+          "expr": "sum by (device) (rate(node_network_receive_bytes_total[1m])) / 1024 / 1024",
+          "legendFormat": "rx {{device}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "MBps" }, "overrides": [] }
+    },
+    {
+      "id": 13,
+      "type": "timeseries",
+      "title": "Throughput recovery (client vs commit)",
+      "datasource": "Prometheus",
+      "gridPos": { "x": 0, "y": 64, "w": 24, "h": 8 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(kv_client_requests_total[10s]))",
+          "legendFormat": "client QPS"
+        },
+        {
+          "refId": "B",
+          "expr": "max(rate(raft_commit_index[10s]))",
+          "legendFormat": "commit/s (leader)"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] }
+    },
+    {
+      "id": 14,
+      "type": "timeseries",
+      "title": "Committed ops during instability (1m window)",
+      "datasource": "Prometheus",
+      "gridPos": { "x": 0, "y": 72, "w": 24, "h": 8 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max_over_time(raft_commit_index[1m]) - min_over_time(raft_commit_index[1m])",
+          "legendFormat": "committed ops/min"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] }
+    }
+  ]
+}
+

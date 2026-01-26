@@ -5,6 +5,7 @@ import (
 	"log"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"raftkv/kvraft1/rsm"
 	"raftkv/kvsrv1/rpc"
@@ -26,6 +27,9 @@ type KVServer struct {
 	//Request object Operation
 	mu    sync.Mutex
 	store map[string]*Data
+	//This is used to send metrics
+	metrics   MetricsSink
+	metricsOn bool
 }
 
 // To type-cast req to the right type, take a look at Go's type switches or type
@@ -33,6 +37,40 @@ type KVServer struct {
 //
 // https://go.dev/tour/methods/16
 // https://go.dev/tour/methods/15
+
+func (kv *KVServer) IncrementOps(method string, error bool, reason string) {
+	if !kv.metricsOn {
+		return
+	}
+	kv.metrics.IncOpsApplied(method)
+	if error {
+		kv.metrics.IncOpError(method, reason)
+	}
+}
+func (kv *KVServer) ObserveSubmitLatency(method string, err rpc.Err, reason string, duration time.Duration) {
+	if !kv.metricsOn {
+		return
+	}
+	status := "ok"
+	if err != rpc.OK {
+		status = "err"
+		if reason == "" {
+			reason = string(err)
+		}
+	}
+	kv.metrics.ObserveSubmitLatency(method, status, reason, duration)
+}
+func (kv *KVServer) UpdateState() {
+	if !kv.metricsOn {
+		return
+	}
+	kv.metrics.SetStateEntries(len(kv.store))
+}
+func (kv *KVServer) UpdateSnapshot(snapshotSize int) {
+	kv.metrics.SetSnapshotBytes(snapshotSize)
+	kv.metrics.IncSnapshot()
+
+}
 func (kv *KVServer) DoOp(req any) any {
 	// Your code here
 	switch r := req.(type) {
@@ -42,8 +80,10 @@ func (kv *KVServer) DoOp(req any) any {
 		v, ok := kv.store[r.Key]
 		//The key is not present
 		if !ok {
+			kv.IncrementOps("Get", true, "no_key")
 			return rpc.GetReply{Value: "", Version: 0, Err: rpc.ErrNoKey}
 		}
+		kv.IncrementOps("Get", false, "")
 		return rpc.GetReply{Value: v.Value, Version: v.Version, Err: rpc.OK}
 	case rpc.PutArgs:
 		kv.mu.Lock()
@@ -51,17 +91,24 @@ func (kv *KVServer) DoOp(req any) any {
 		v, ok := kv.store[r.Key]
 		if !ok {
 			if r.Version != 0 {
+				kv.IncrementOps("Put", true, "version")
 				return rpc.PutReply{Err: rpc.ErrVersion}
 			}
 			kv.store[r.Key] = &Data{Value: r.Value, Version: 1}
+			kv.UpdateState()
+			kv.IncrementOps("Put", false, "")
 			return rpc.PutReply{Err: rpc.OK}
 		}
 		//There is a version mismatch
 		if r.Version != v.Version {
+			kv.IncrementOps("Put", true, "version")
+
 			return rpc.PutReply{Err: rpc.ErrVersion}
 		}
 		//If the same version, do the put operation and return it as success
 		kv.store[r.Key] = &Data{Value: r.Value, Version: v.Version + 1}
+		kv.UpdateState()
+		kv.IncrementOps("Put", false, "")
 		return rpc.PutReply{Err: rpc.OK}
 	default:
 		log.Fatalf("KVServer.DoOp: unexpected req type %T", req)
@@ -77,6 +124,7 @@ func (kv *KVServer) Snapshot() []byte {
 	encoder.Encode(kv.store)
 	kv.mu.Unlock()
 	snapshotstate := w.Bytes()
+	kv.UpdateSnapshot(len(snapshotstate))
 	return snapshotstate
 }
 
@@ -91,20 +139,28 @@ func (kv *KVServer) Restore(data []byte) {
 	kv.mu.Lock()
 	defer kv.mu.Unlock()
 	kv.store = store
+	kv.UpdateState()
 }
 
 func (kv *KVServer) Get(args *rpc.GetArgs, reply *rpc.GetReply) {
 	// Your code here. Use kv.rsm.Submit() to submit args
 	// You can use go's type casts to turn the any return value
 	// of Submit() into a GetReply: rep.(rpc.GetReply)
+	start := time.Now()
 	err, res := kv.rsm.Submit(*args)
 	if err != rpc.OK {
+		kv.ObserveSubmitLatency("Get", err, "wrong_leader", time.Since(start))
 		reply.Err = err
 		reply.Value = ""
 		reply.Version = 0
 		return
 	} else {
 		rep := res.(rpc.GetReply)
+		if rep.Err == rpc.ErrNoKey {
+			kv.ObserveSubmitLatency("Get", rpc.ErrNoKey, "no_key", time.Since(start))
+		} else {
+			kv.ObserveSubmitLatency("Get", rpc.OK, "", time.Since(start))
+		}
 		*reply = rep
 	}
 
@@ -115,13 +171,20 @@ func (kv *KVServer) Put(args *rpc.PutArgs, reply *rpc.PutReply) {
 	// You can use go's type casts to turn the any return value
 	// of Submit() into a PutReply: rep.(rpc.PutReply)
 
+	start := time.Now()
 	err, res := kv.rsm.Submit(*args)
 	if err != rpc.OK {
+		kv.ObserveSubmitLatency("Put", err, "wrong_leader", time.Since(start))
 		reply.Err = err
 		return
 	}
 	rep := res.(rpc.PutReply)
 	reply.Err = rep.Err
+	if rep.Err == rpc.ErrVersion {
+		kv.ObserveSubmitLatency("Put", rpc.ErrVersion, "version", time.Since(start))
+	} else {
+		kv.ObserveSubmitLatency("Put", rpc.OK, "", time.Since(start))
+	}
 
 }
 
@@ -153,9 +216,12 @@ func StartKVServer(servers []*labrpc.ClientEnd, gid tester.Tgid, me int, persist
 	labgob.Register(rpc.GetArgs{})
 
 	kv := &KVServer{me: me}
+	kv.metrics = getMetricsSink()
+	kv.metricsOn = metricsEnabled()
 	//kv.Restore(persister.ReadSnapshot())
 	kv.store = make(map[string]*Data) // Initialize before RSM (Restore will overwrite if snapshot exists)
 
 	kv.rsm = rsm.MakeRSM(servers, me, persister, maxraftstate, kv)
+
 	return []tester.IService{kv, kv.rsm.Raft()}
 }

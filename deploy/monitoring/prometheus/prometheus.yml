@@ -1,0 +1,13 @@
+global:
+  scrape_interval: 1s
+  evaluation_interval: 1s
+
+scrape_configs:
+  - job_name: raftkv
+    metrics_path: /metrics
+    static_configs:
+      # Your Raft process runs on the host; from Docker, reach it via host.docker.internal.
+      - targets:
+          - host.docker.internal:2113
+
+

@@ -17,6 +17,13 @@ var useRaftStateMachine bool // to plug in another raft besided raft1
 
 var rsmDebug = os.Getenv("RSM_DEBUG") == "1"
 
+var raftMetricsSink raft.MetricsSink
+
+// SetRaftMetricsSink allows scenarios to attach a Raft metrics sink for KV servers.
+func SetRaftMetricsSink(s raft.MetricsSink) {
+	raftMetricsSink = s
+}
+
 func rsmDPrintf(format string, args ...any) {
 	if rsmDebug {
 		log.Printf("[rsm] "+format, args...)
@@ -91,7 +98,11 @@ func MakeRSM(servers []*labrpc.ClientEnd, me int, persister *tester.Persister, m
 		applied: make(map[int]OpResult),
 	}
 	if !useRaftStateMachine {
-		rsm.rf = raft.Make(servers, me, persister, rsm.applyCh)
+		var tr raft.Transport = raft.NewLabrpcTransport(servers)
+		if raftMetricsSink != nil {
+			tr = raft.NewMetricsTransport(me, tr, raftMetricsSink)
+		}
+		rsm.rf = raft.Make(tr, me, persister, rsm.applyCh, raftMetricsSink)
 	}
 	//Restore snapshot on startup if one exists
 	snapshot := persister.ReadSnapshot()
@@ -232,6 +243,9 @@ func (rsm *RSM) Submit(req any) (rpc.Err, any) {
 			if !stillLeader || curTerm != startTerm {
 				return rpc.ErrWrongLeader, nil
 			}
+		//After waiting for 2 seconds if I still dont get a response I am going to return(look at how channels are managed)
+		case <-time.After(1 * time.Second):
+			return rpc.ErrWrongLeader, nil
 		}
 	}
 
