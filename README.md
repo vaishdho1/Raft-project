@@ -1,6 +1,6 @@
 # Raft Consensus Protocol
 This project implements a production style Raft consensus protocol in Go. It includes leader election, log replication, crash safe persistence, and snapshot based log compaction, and uses Porcupine to check linearizability.
-It also implements a Raft backed replicated KV store.
+It also implements a Raft backed replicated KV store. It also includes an observability layer which tracks metrics for the Raft and KV store. I have summarized my learnings in the blog post [Agreeing under Chaos](file:///Users/vaishnavip/Projects/my-portfolio/raft-consensus-protocol.html).
 
 ## Features
 
