@@ -26,10 +26,15 @@ For the full design write-up, see [Agreeing Under Chaos](https://vaishdho1.githu
 
 ## Key design decisions
 
-- **Per-peer replication:** long-lived per-follower loops with trigger channels avoid goroutine explosions under unreliable networks
-- **Fast log repair:** followers return conflict metadata so leaders backtrack by term instead of one index at a time
-- **Persistence model:** synchronous persistence for correctness-sensitive transitions, asynchronous snapshot writes with durable completion
-- **Retry-safe writes:** version-gated puts make retries idempotent without server-side dedup state
+## Key design decisions
+
+- **Per-follower replication loops:** each follower has a long-running replication loop instead of creating a new goroutine for every retry. This keeps concurrency bounded when the network is unreliable.
+
+- **Fast log repair:** when a follower rejects an append, it returns conflict information so the leader can jump back by term instead of scanning back one log entry at a time.
+
+- **Crash-safe persistence:** uses synchronous persistence for correctness-critical Raft state changes and asynchronous persistence for lower-priority writes such as snapshots.
+
+- **Retry-safe writes:** writes use client-provided versions, so retrying a timed-out request does not accidentally apply the same logical update twice.
 
 ## Evaluation
 
