@@ -26,8 +26,6 @@ For the full design write-up, see [Agreeing Under Chaos](https://vaishdho1.githu
 
 ## Key design decisions
 
-## Key design decisions
-
 - **Per-follower replication loops:** each follower has a long-running replication loop instead of creating a new goroutine for every retry. This keeps concurrency bounded when the network is unreliable.
 
 - **Fast log repair:** when a follower rejects an append, it returns conflict information so the leader can jump back by term instead of scanning back one log entry at a time.
